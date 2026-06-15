@@ -7,10 +7,10 @@ import time
 # 1. PAGE CONFIGURATION & HEADER
 # ==========================================
 st.set_page_config(page_title="Mazda RX-8 Spirit R Simulator", layout="wide")
-st.title(" 🏎️ Mazda RX-8 Spirit R Twin-Turbo Acceleration Simulation")
+st.title(" Mazda RX-8 Spirit R Twin-Turbo Acceleration Simulation")
 st.markdown("""
 This simulator validates the longitudinal dynamics of a modified Mazda RX-8 Spirit R.
-You can now **tune the individual boost pressures of the sequential turbochargers** via the sidebar (0% to 100%) to observe the direct impact on the power band and the 300 km/h top speed challenge.
+You can **tune the individual boost pressures of the sequential turbochargers** via the sidebar to observe the direct impact on the power band and the 300 km/h top speed challenge.
 """)
 
 # ==========================================
