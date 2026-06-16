@@ -135,47 +135,58 @@ fig_eng.update_layout(
 st.plotly_chart(fig_eng, use_container_width=True)
 
 # ==========================================
-# 5. LONGITUDINAL DYNAMICS SIMULATION (DYNAMIC)
+# 5. LONGITUDINAL DYNAMICS SIMULATION (DYNAMIC WITH POWER & TORQUE)
 # ==========================================
+import time # Ensure this is imported at the top of your file!
+
 st.markdown("---")
 st.subheader("⏱️ Dynamic Acceleration Simulation (0 - 300+ km/h)")
 
 if st.button("🚀 RUN DYNAMIC SIMULATION", type="primary"):
-    rho = 1.225
-    g = 9.81
-    Crr = 0.015
-    mu = 1.0
+    # Environmental Constants
+    rho = 1.225 # Air density (kg/m^3)
+    g = 9.81    # Gravity (m/s^2)
+    Crr = 0.015 # Rolling resistance coefficient
+    mu = 1.0    # Tire grip coefficient
 
-    dt = 0.01
+    # Integration variables
+    dt = 0.01  # Time step (10ms)
     t = 0.0
     v_ms = 0.0
     current_gear = 1
-    engine_rpm = launch_rpm
+    engine_rpm = launch_rpm # Initialize RPM
+    current_torque = 0.0    # Initialize Torque variable
     
+    # Trackers
     time_100, time_200, time_300 = None, None, None
     time_history, speed_history, gear_history, force_history, resist_history = [], [], [], [], []
     
     is_shifting = False
     shift_timer = 0.0
     
-    st.markdown("### 🏎️ Live Telemetry")
+    # --- UI Placeholders for Dynamic Animation ---
+    st.markdown("### Live Telemetry")
     progress_bar = st.progress(0)
-    live_dashboard = st.empty()
+    live_dashboard = st.empty() # Placeholder for live metrics
     
-    # Cap maximum simulation time at 60.0 seconds
+    # Run loop until 310 km/h or timeout (60 seconds)
     while (v_ms * 3.6) < 310.0 and t < 60.0:
         v_kmh = v_ms * 3.6
         
+        # Record milestones
         if v_kmh >= 100 and time_100 is None: time_100 = t
         if v_kmh >= 200 and time_200 is None: time_200 = t
         if v_kmh >= 300 and time_300 is None: time_300 = t
             
+        # Resistance
         F_aero = 0.5 * rho * Cd * A * v_ms**2
         F_roll = mass * g * Crr
         F_resistance = F_aero + F_roll
         
+        # Drivetrain State Machine
         if is_shifting:
             F_tractive = 0.0
+            current_torque = 0.0 # Torque drops to zero during gear shifts
             shift_timer -= dt
             if shift_timer <= 0:
                 is_shifting = False
@@ -183,63 +194,86 @@ if st.button("🚀 RUN DYNAMIC SIMULATION", type="primary"):
             engine_rpm = wheel_rpm * gear_ratios[current_gear] * final_drive
         else:
             if current_gear == 1 and t <= slip_time:
+                # 1st Gear Clutch Slip Phase
                 engine_rpm = launch_rpm
                 k_slip = t / slip_time if slip_time > 0 else 1.0
                 current_torque = get_total_torque(engine_rpm, small_turbo_pct, large_turbo_pct)
                 F_tractive = (current_torque * gear_ratios[current_gear] * final_drive * drivetrain_efficiency) / tire_radius * k_slip
             else:
+                # Locked Gear Phase
                 wheel_rpm = (v_ms * 60) / (2 * np.pi * tire_radius)
                 engine_rpm = wheel_rpm * gear_ratios[current_gear] * final_drive
                 
+                # Check for Redline Shift trigger
                 if engine_rpm > redline_rpm and current_gear < max(gear_ratios.keys()):
                     is_shifting = True
                     current_gear += 1
                     shift_timer = shift_time
                     F_tractive = 0.0
+                    current_torque = 0.0 # Instant cut-off
                 else:
                     current_torque = get_total_torque(engine_rpm, small_turbo_pct, large_turbo_pct)
                     F_tractive = (current_torque * gear_ratios[current_gear] * final_drive * drivetrain_efficiency) / tire_radius
             
+            # Traction limit check
             F_max_grip = mu * mass * g
             F_tractive = min(F_tractive, F_max_grip)
             
+        # Equivalent mass calculation
         delta = 0.04 + 0.05 * (gear_ratios[current_gear]**2)
         m_eq = mass * (1 + delta)
         
+        # Instantaneous acceleration calculation
         a = (F_tractive - F_resistance) / m_eq
         
         if a < 0 and not is_shifting and F_tractive > 0:
-            a = 0 
+            a = 0 # Top speed limit hit
             
+        # Euler integration step
         v_ms += a * dt
         t += dt
         
+        # Save logs
         time_history.append(t)
         speed_history.append(v_kmh)
         gear_history.append(current_gear)
         force_history.append(F_tractive)
         resist_history.append(F_resistance)
         
-        # 1:1 real-time sync (0.1s update steps with 0.1s sleep)
+        # ==========================================
+        # UI DYNAMIC UPDATE LOGIC (1:1 SIMULATION)
+        # ==========================================
+        # Refresh the dashboard view every 10 iterations (0.1 seconds of sim time)
         if int(t / dt) % 10 == 0:
             progress_val = min(int((v_kmh / 310) * 100), 100)
             progress_bar.progress(progress_val)
             
+            # Calculate live horsepower (hp) from real-time torque and engine speed
+            live_power_kw = (current_torque * engine_rpm) / 9550
+            live_power_hp = live_power_kw * 1.341
+            
             with live_dashboard.container():
-                lc1, lc2, lc3, lc4 = st.columns(4)
+                # Expanded into 6 metrics column layout
+                lc1, lc2, lc3, lc4, lc5, lc6 = st.columns(6)
                 lc1.metric("Live Speed", f"{v_kmh:.1f} km/h")
                 lc2.metric("Current Gear", f"G {current_gear}")
+                
                 rpm_color = "🔴" if is_shifting or engine_rpm > (redline_rpm - 500) else "🟢"
                 lc3.metric("Engine RPM", f"{rpm_color} {int(engine_rpm)} RPM")
-                lc4.metric("Sim Time", f"{t:.1f} s")
                 
-            time.sleep(0.1) 
+                # New Telemetry Indicators
+                lc4.metric("Live Torque", f"{current_torque:.1f} Nm")
+                lc5.metric("Live Power", f"{live_power_hp:.1f} hp")
+                
+                lc6.metric("Sim Time", f"{t:.1f} s")
+                
+            time.sleep(0.1) # Pauses for 0.1s in real-world to achieve a 1:1 timeline match
             
         if a == 0 and current_gear == 6 and not is_shifting:
             break
 
     # ==========================================
-    # 6. FINAL RESULTS & VISUALIZATION
+    # 6. FINAL RESULTS & VISUALIZATION - INTERACTIVE
     # ==========================================
     live_dashboard.empty()
     st.success("🏁 Simulation Complete!")
